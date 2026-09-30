@@ -9,7 +9,7 @@ import Link from 'next/link';
 export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [initialLeaves, setInitialLeaves] = useState(0);
+  const [initialLeaves, setInitialLeaves] = useState<number | ''>('');
   const [error, setError] = useState('');
   const router = useRouter();
   const { login } = useAuth();
@@ -17,7 +17,11 @@ export default function Register() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await api.post('/auth/register', { email, password, initialLeaves });
+      const res = await api.post('/auth/register', { 
+        email, 
+        password, 
+        initialLeaves: initialLeaves === '' ? 0 : initialLeaves 
+      });
       login(res.data.token, res.data.user);
       router.push('/');
     } catch (err: any) {
@@ -61,7 +65,7 @@ export default function Register() {
             type="number" 
             className="w-full border p-2 rounded"
             value={initialLeaves}
-            onChange={(e) => setInitialLeaves(Number(e.target.value))}
+            onChange={(e) => setInitialLeaves(e.target.value === '' ? '' : Number(e.target.value))}
           />
         </div>
 
