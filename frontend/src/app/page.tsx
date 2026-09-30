@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import useSWR from 'swr';
 import { useAuth } from '@/lib/AuthContext';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
@@ -18,6 +19,8 @@ import {
 } from 'date-fns';
 import { ChevronLeft, ChevronRight, Info, Check } from 'lucide-react';
 
+const fetcher = (url: string) => api.get(url).then(res => res.data);
+
 interface Stats {
   initialLeaves: number;
   regularWorkedDays: number;
@@ -25,6 +28,10 @@ interface Stats {
   takenLeaves: number;
   earnedLeavesFromWork: number;
   totalLeavesAvailable: number;
+  totalExtraLeaves?: number;
+  offsets?: {
+    takenLeavesOffset?: number;
+  };
 }
 
 interface WorkDay {
@@ -39,38 +46,18 @@ export default function Home() {
   const router = useRouter();
   
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [holidays, setHolidays] = useState<Record<string, string>>({});
-  const [workDays, setWorkDays] = useState<WorkDay[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
   const [isEditingStats, setIsEditingStats] = useState(false);
   const [editForm, setEditForm] = useState({ initialLeaves: 0, earnedLeaves: 0, extraLeaves: 0, takenLeaves: 0 });
+
+  const { data: holidays = {} } = useSWR<Record<string, string>>(user ? '/holidays' : null, fetcher);
+  const { data: workDays = [], mutate: mutateWorkDays } = useSWR<WorkDay[]>(user ? '/workdays' : null, fetcher);
+  const { data: stats, mutate: mutateStats } = useSWR<Stats>(user ? '/workdays/stats' : null, fetcher);
 
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login');
     }
   }, [user, loading, router]);
-
-  const fetchData = async () => {
-    try {
-      const [holidaysRes, workDaysRes, statsRes] = await Promise.all([
-        api.get('/holidays'),
-        api.get('/workdays'),
-        api.get('/workdays/stats')
-      ]);
-      setHolidays(holidaysRes.data);
-      setWorkDays(workDaysRes.data);
-      setStats(statsRes.data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  useEffect(() => {
-    if (user) {
-      fetchData();
-    }
-  }, [user]);
 
   const handleDayClick = async (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -81,12 +68,43 @@ export default function Home() {
     if (existingDay?.isWorked) nextStatus = 'LEAVE';
     else if (existingDay?.isLeaveTaken) nextStatus = 'NONE';
 
-    try {
-      await api.post('/workdays/mark', { date: dateStr, status: nextStatus });
-      fetchData(); // Refresh data to get updated stats
-    } catch (err) {
-      console.error('Failed to mark day', err);
+    // 1. Calculate optimistic state
+    const updatedWorkDays = [...workDays];
+    const dayIndex = updatedWorkDays.findIndex(d => d.date === dateStr);
+    
+    const newDayState = {
+      _id: existingDay?._id || `temp-${Date.now()}`,
+      date: dateStr,
+      isWorked: nextStatus === 'WORKED',
+      isLeaveTaken: nextStatus === 'LEAVE'
+    };
+
+    if (dayIndex >= 0) {
+      if (nextStatus === 'NONE') {
+        updatedWorkDays.splice(dayIndex, 1);
+      } else {
+        updatedWorkDays[dayIndex] = { ...updatedWorkDays[dayIndex], ...newDayState };
+      }
+    } else if (nextStatus !== 'NONE') {
+      updatedWorkDays.push(newDayState);
     }
+
+    // 2. The API promise
+    const updatePromise = api.post('/workdays/mark', { date: dateStr, status: nextStatus }).then(async () => {
+      mutateStats(); // revalidate stats in background
+      const res = await api.get('/workdays'); // return latest truth
+      return res.data;
+    });
+
+    // 3. Mutate with SWR
+    mutateWorkDays(updatePromise, {
+      optimisticData: updatedWorkDays,
+      rollbackOnError: true,
+      populateCache: true,
+      revalidate: false // already fetched in promise
+    }).catch(err => {
+      console.error('Failed to mark day', err);
+    });
   };
 
   const handleEditClick = () => {
@@ -94,7 +112,7 @@ export default function Home() {
     setEditForm({
       initialLeaves: stats.initialLeaves,
       earnedLeaves: stats.earnedLeavesFromWork,
-      extraLeaves: stats.totalExtraLeaves,
+      extraLeaves: stats.totalExtraLeaves || 0,
       takenLeaves: stats.takenLeaves
     });
     setIsEditingStats(true);
@@ -116,7 +134,7 @@ export default function Home() {
     try {
       await api.post('/workdays/stats', payload);
       setIsEditingStats(false);
-      fetchData();
+      mutateStats();
     } catch (err) {
       console.error(err);
     }
