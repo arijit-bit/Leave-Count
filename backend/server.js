@@ -28,10 +28,22 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 5005;
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/leave-count')
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.log(err));
+let isConnected = false;
+const connectDB = async () => {
+  if (isConnected) return;
+  try {
+    const db = await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/leave-count');
+    isConnected = db.connections[0].readyState;
+    console.log('MongoDB connected (Serverless)');
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+  }
+};
+
+app.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
