@@ -42,6 +42,8 @@ export default function Home() {
   const [holidays, setHolidays] = useState<Record<string, string>>({});
   const [workDays, setWorkDays] = useState<WorkDay[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [isEditingStats, setIsEditingStats] = useState(false);
+  const [editForm, setEditForm] = useState({ initialLeaves: 0, earnedLeaves: 0, extraLeaves: 0, takenLeaves: 0 });
 
   useEffect(() => {
     if (!loading && !user) {
@@ -84,6 +86,39 @@ export default function Home() {
       fetchData(); // Refresh data to get updated stats
     } catch (err) {
       console.error('Failed to mark day', err);
+    }
+  };
+
+  const handleEditClick = () => {
+    if (!stats) return;
+    setEditForm({
+      initialLeaves: stats.initialLeaves,
+      earnedLeaves: stats.earnedLeavesFromWork,
+      extraLeaves: stats.totalExtraLeaves,
+      takenLeaves: stats.takenLeaves
+    });
+    setIsEditingStats(true);
+  };
+
+  const handleSaveStats = async () => {
+    if (!stats) return;
+    const baseEarned = Math.floor(stats.regularWorkedDays / 7);
+    const baseExtra = stats.workedHolidays;
+    const baseTaken = stats.takenLeaves - (stats.offsets?.takenLeavesOffset || 0);
+
+    const payload = {
+      initialLeaves: editForm.initialLeaves,
+      earnedLeavesOffset: editForm.earnedLeaves - baseEarned,
+      extraLeavesOffset: editForm.extraLeaves - baseExtra,
+      takenLeavesOffset: editForm.takenLeaves - baseTaken,
+    };
+
+    try {
+      await api.post('/workdays/stats', payload);
+      setIsEditingStats(false);
+      fetchData();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -213,42 +248,74 @@ export default function Home() {
       
       <div className="w-full md:w-80">
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 sticky top-6">
-          <h3 className="text-lg font-bold mb-4 border-b pb-2">Your Leave Stats</h3>
+          <div className="flex justify-between items-center mb-4 border-b pb-2">
+            <h3 className="text-lg font-bold">Your Leave Stats</h3>
+            {!isEditingStats && stats && (
+              <button onClick={handleEditClick} className="text-xs text-indigo-600 hover:underline">
+                Edit
+              </button>
+            )}
+          </div>
           {stats ? (
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Initial Leaves:</span>
-                <span className="font-semibold">{stats.initialLeaves}</span>
+            isEditingStats ? (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600 text-sm">Initial Leaves:</span>
+                  <input type="number" className="border w-20 p-1 text-right rounded" value={editForm.initialLeaves} onChange={(e) => setEditForm({...editForm, initialLeaves: Number(e.target.value)})} />
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600 text-sm">Earned Leaves:</span>
+                  <input type="number" className="border w-20 p-1 text-right rounded" value={editForm.earnedLeaves} onChange={(e) => setEditForm({...editForm, earnedLeaves: Number(e.target.value)})} />
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600 text-sm">Extra Leaves:</span>
+                  <input type="number" className="border w-20 p-1 text-right rounded" value={editForm.extraLeaves} onChange={(e) => setEditForm({...editForm, extraLeaves: Number(e.target.value)})} />
+                </div>
+                <div className="flex justify-between items-center text-red-500">
+                  <span className="text-sm">Taken Leaves:</span>
+                  <input type="number" className="border w-20 p-1 text-right rounded text-black" value={editForm.takenLeaves} onChange={(e) => setEditForm({...editForm, takenLeaves: Number(e.target.value)})} />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button onClick={handleSaveStats} className="bg-indigo-600 text-white flex-1 py-1 rounded text-sm hover:bg-indigo-700">Save</button>
+                  <button onClick={() => setIsEditingStats(false)} className="bg-gray-200 text-gray-800 flex-1 py-1 rounded text-sm hover:bg-gray-300">Cancel</button>
+                </div>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Regular Worked Days:</span>
-                <span className="font-semibold">{stats.regularWorkedDays}</span>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Initial Leaves:</span>
+                  <span className="font-semibold">{stats.initialLeaves}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Regular Worked Days:</span>
+                  <span className="font-semibold">{stats.regularWorkedDays}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm text-gray-500">
+                   <span>↳ Earned Leaves:</span>
+                   <span className="font-medium text-green-600">+{stats.earnedLeavesFromWork}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Worked Holidays:</span>
+                  <span className="font-semibold">{stats.workedHolidays}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm text-gray-500">
+                   <span>↳ Extra Leaves:</span>
+                   <span className="font-medium text-green-600">+{stats.totalExtraLeaves}</span>
+                </div>
+                <div className="flex justify-between items-center text-red-500">
+                  <span>Taken Leaves:</span>
+                  <span className="font-semibold">-{stats.takenLeaves}</span>
+                </div>
+                <div className="border-t pt-3 mt-3 flex justify-between items-center">
+                  <span className="text-lg font-bold text-gray-800">Total Available:</span>
+                  <span className="text-2xl font-black text-indigo-600">{stats.totalLeavesAvailable}</span>
+                </div>
+                
+                <div className="mt-4 text-xs text-gray-500 bg-gray-50 p-3 rounded border border-gray-100">
+                  <strong>Rule:</strong> You earn 1 leave for every 7 days worked. Working on a national/regional holiday gives you 1 full extra leave.
+                </div>
               </div>
-              <div className="flex justify-between items-center text-sm text-gray-500">
-                 <span>↳ Earned Leaves:</span>
-                 <span className="font-medium text-green-600">+{stats.earnedLeavesFromWork}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Worked Holidays:</span>
-                <span className="font-semibold">{stats.workedHolidays}</span>
-              </div>
-              <div className="flex justify-between items-center text-sm text-gray-500">
-                 <span>↳ Extra Leaves:</span>
-                 <span className="font-medium text-green-600">+{stats.workedHolidays}</span>
-              </div>
-              <div className="flex justify-between items-center text-red-500">
-                <span>Taken Leaves:</span>
-                <span className="font-semibold">-{stats.takenLeaves}</span>
-              </div>
-              <div className="border-t pt-3 mt-3 flex justify-between items-center">
-                <span className="text-lg font-bold text-gray-800">Total Available:</span>
-                <span className="text-2xl font-black text-indigo-600">{stats.totalLeavesAvailable}</span>
-              </div>
-              
-              <div className="mt-4 text-xs text-gray-500 bg-gray-50 p-3 rounded border border-gray-100">
-                <strong>Rule:</strong> You earn 1 leave for every 7 days worked. Working on a national/regional holiday gives you 1 full extra leave.
-              </div>
-            </div>
+            )
           ) : (
              <div className="text-gray-400 text-sm">Loading stats...</div>
           )}

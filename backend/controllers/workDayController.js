@@ -74,17 +74,44 @@ exports.getStats = async (req, res) => {
       }
     });
 
-    const earnedLeavesFromWork = Math.floor(regularWorkedDays / 7);
-    const totalLeavesAvailable = user.initialLeaves + earnedLeavesFromWork + workedHolidays - takenLeaves;
+    const earnedLeavesFromWork = Math.floor(regularWorkedDays / 7) + (user.earnedLeavesOffset || 0);
+    const totalExtraLeaves = workedHolidays + (user.extraLeavesOffset || 0);
+    const finalTakenLeaves = takenLeaves + (user.takenLeavesOffset || 0);
+
+    const totalLeavesAvailable = user.initialLeaves + earnedLeavesFromWork + totalExtraLeaves - finalTakenLeaves;
 
     res.json({
       initialLeaves: user.initialLeaves,
       regularWorkedDays,
       workedHolidays,
-      takenLeaves,
+      takenLeaves: finalTakenLeaves,
       earnedLeavesFromWork,
-      totalLeavesAvailable
+      totalExtraLeaves,
+      totalLeavesAvailable,
+      offsets: {
+        earnedLeavesOffset: user.earnedLeavesOffset || 0,
+        extraLeavesOffset: user.extraLeavesOffset || 0,
+        takenLeavesOffset: user.takenLeavesOffset || 0
+      }
     });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+exports.updateStats = async (req, res) => {
+  try {
+    const { initialLeaves, earnedLeavesOffset, extraLeavesOffset, takenLeavesOffset } = req.body;
+    const user = await User.findById(req.user.id);
+    
+    if (initialLeaves !== undefined) user.initialLeaves = initialLeaves;
+    if (earnedLeavesOffset !== undefined) user.earnedLeavesOffset = earnedLeavesOffset;
+    if (extraLeavesOffset !== undefined) user.extraLeavesOffset = extraLeavesOffset;
+    if (takenLeavesOffset !== undefined) user.takenLeavesOffset = takenLeavesOffset;
+
+    await user.save();
+    res.json({ message: 'Stats updated successfully' });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
